@@ -1,0 +1,25 @@
+Version 1
+Geometry  /Users/thomassiegert/MEGAlib/massmodel_3DeadDets_0_5_8/COSI.DetectorHead.geo.setup
+PhysicsListEM   LivermorePol
+PhysicsListEMActivateFluorescence   false
+StoreCalibrated   true
+StoreSimulationInfoIonization   false
+StoreOnlyTriggeredEvents   true
+DiscretizeHits   true
+StoreSimulationInfo   init-only
+
+Run NovaFlash
+NovaFlash.Filename NovaFlash
+NovaFlash.Time 1467094373
+NovaFlash.OrientationSky Galactic File NoLoop OP_160628_1hour.ori
+
+NovaFlash.Source Nova
+
+Nova.ParticleType	1
+Nova.Beam	FarFieldPointSource	0	0
+Nova.Orientation	Galactic	Fixed	-04.5  -1.23
+Nova.Spectrum	Mono	511
+Nova.Flux	0.01
+
+
+
