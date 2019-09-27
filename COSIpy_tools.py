@@ -201,7 +201,7 @@ def read_COSI_DataSet(dor):
         lonZ[lonZ > np.pi] -= 2*np.pi
         phi = np.array(phi)
         chi_loc = np.array(chi_loc)
-        chi_loc[chi_loc < 0] += 2*np.pi
+        chi_loc[chi_loc < 0] += 2*np.pi ### TS: MIGHT BE WRONG!
         psi_loc = np.array(psi_loc)
         dist = np.array(dist)
         chi_gal = np.array(chi_gal)
@@ -232,7 +232,130 @@ def read_COSI_DataSet(dor):
     return COSI_Data
 
 
-def hourly_tags(COSI_Data):
+
+def read_COSI_DataSet_PE(dor):
+    """
+    Reads in all MEGAlib .tra (or .tra.gz) files in given directory 'dor'
+    If full flight/mission data set is read in, e.g. from /FlightData_Processed_v4/ with standard names,
+    the data set is split up into days and hours of observations. Otherwise, everything is lumped together.
+    Returns COSI data set as a dictionary of the form
+    COSI_DataSet = {'Day':trafiles[i][StrBeg:StrBeg+StrLen],
+                    'Energies':erg,
+                    'TimeTags':tt,
+                    'Xpointings':np.array([lonX,latX]).T,
+                    'Ypointings':np.array([lonY,latY]).T,
+                    'Zpointings':np.array([lonZ,latZ]).T,
+                    'Phi':phi,
+                    'Chi local':chi_loc,
+                    'Psi local':psi_loc,
+                    'Distance':dist,
+                    'Chi galactic':chi_gal,
+                    'Psi galactic':psi_gal}
+    :param: dor    Path of directory in which data set is stored
+    """
+    
+    # Search for files in directory
+    trafiles = []
+    for dirpath, subdirs, files in os.walk(dor):
+        for file in files:
+            if glob.fnmatch.fnmatch(file,"*.tra*"):
+                trafiles.append(os.path.join(dirpath, file))
+
+    # sort files (only with standard names)
+    trafiles = sorted(trafiles)
+
+    # string lengths to get day as key
+    StrBeg = len(dor)+len('OP_')
+    StrLen = 6
+
+    # read COSI data
+    COSI_Data = []
+    
+    # loop over all tra files
+    for i in tqdm(range(len(trafiles))):
+        
+        Reader = M.MFileEventsTra()
+        if Reader.Open(M.MString(trafiles[i])) == False:
+            print("Unable to open file " + trafiles[i] + ". Aborting!")
+            quit()
+            
+        erg = []   # Photo energy
+        tt = []    # Time tag
+        et = []    # Event Type
+        latX = []  # latitude of X direction of spacecraft
+        lonX = []  # lontitude of X direction of spacecraft
+        latZ = []  # latitude of Z direction of spacecraft
+        lonZ = []  # longitude of Z direction of spacecraft
+        phi = []   # Compton scattering angle
+        chi_loc = [] # measured data space angle chi
+        psi_loc = [] # measured data space angle psi
+        dist = []    # First lever arm
+        chi_gal = [] # measured gal angle chi (lon direction)
+        psi_gal = [] # measured gal angle psi (lat direction)
+
+        while True:
+            Event = Reader.GetNextEvent()
+            if not Event:
+                break
+# read all photo events # !!!            if Event.GetEventType() == M.MPhysicalEvent.:
+            # all calculations and definitions taken from /MEGAlib/src/response/src/MResponseImagingBinnedMode.cxx
+            erg.append(Event.Ei()) # Total Compton Energy
+            tt.append(Event.GetTime().GetAsSeconds()) # Time tag in seconds since ...
+            et.append(Event.GetEventType()) # Event type (0 = Compton, 4 = Photo)
+            latX.append(Event.GetGalacticPointingXAxisLatitude()) # x axis of space craft pointing at GAL latitude
+            lonX.append(Event.GetGalacticPointingXAxisLongitude()) # x axis of space craft pointing at GAL longitude
+            latZ.append(Event.GetGalacticPointingZAxisLatitude()) # z axis of space craft pointing at GAL latitude
+            lonZ.append(Event.GetGalacticPointingZAxisLongitude()) # z axis of space craft pointing at GAL longitude
+
+        erg = np.array(erg)
+        tt = np.array(tt)
+        et = np.array(et)
+        latX = np.array(latX)
+        lonX = np.array(lonX)
+        lonX[lonX > np.pi] -= 2*np.pi
+        latZ = np.array(latZ)
+        lonZ = np.array(lonZ)
+        lonZ[lonZ > np.pi] -= 2*np.pi
+        phi = np.array(phi)
+        chi_loc = np.array(chi_loc)
+        chi_loc[chi_loc < 0] += 2*np.pi ### TS: MIGHT BE WRONG!
+        psi_loc = np.array(psi_loc)
+        dist = np.array(dist)
+        chi_gal = np.array(chi_gal)
+        psi_gal = np.array(psi_gal)
+        # construct Y direction from X and Z direction
+        lonlatY = construct_scy(np.rad2deg(lonX),np.rad2deg(latX),np.rad2deg(lonZ),np.rad2deg(latZ))
+        lonY = np.deg2rad(lonlatY[0])
+        latY = np.deg2rad(lonlatY[1])
+        # avoid negative zeros
+        chi_loc[np.where(chi_loc == 0.0)] = np.abs(chi_loc[np.where(chi_loc == 0.0)])
+        
+        # make observation dictionary
+        COSI_DataSet = {'Day':trafiles[i][StrBeg:StrBeg+StrLen],
+                        'Energies':erg,
+                        'TimeTags':tt,
+                        'Xpointings':np.array([lonX,latX]).T,
+                        'Ypointings':np.array([lonY,latY]).T,
+                        'Zpointings':np.array([lonZ,latZ]).T,
+                        'Phi':phi,
+                        'Chi local':chi_loc,
+                        'Psi local':psi_loc,
+                        'Distance':dist,
+                        'Chi galactic':chi_gal,
+                        'Psi galactic':psi_gal}
+    
+        COSI_Data.append(COSI_DataSet)
+
+    return COSI_Data
+
+
+
+
+
+
+
+
+def hourly_tags(COSI_Data,n_hours=24):
     """
     Get COSI data reformatted to one data set per hour in each day of the observation
     (Basically only useful if not single observations are used)
@@ -246,7 +369,7 @@ def hourly_tags(COSI_Data):
     s2d = 1./86400
     s2h = 1./3600
     # number of hours per day
-    n_hours = 24
+    #n_hours = 24 # TS: by default 24, otherwise set according to data set
     
     # fill data
     data = []
@@ -521,6 +644,158 @@ def get_binned_data_oneday(COSI_Data,tdx,pp,bb,ll,dpp,dbb,dll):
                                                   (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] < np.around(bb[c]+dbb[c]/2,6)) &
                                                   (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] >= np.around(ll[c]-dll[c]/2,6)) &
                                                   (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] < np.around(ll[c]+dll[c]/2,6)))[0])
+                
+    return binned_data
+
+
+
+def get_binned_data_hourly(COSI_Data,tdx,pp,bb,ll,dpp,dbb,dll,n_hours):
+    """
+    Same as get_binned_data() but for data set with n_hours hours
+    :param: COSI_Data   COSI data set dictionary from read_COSI_DataSet()
+    :param: tdx         Time tag indices as hourly binned dictionary from hourly_tags() as (1,n_hours) array
+    :param: pp          PHI bins from FISBEL
+    :param: bb          PSI bins from FISBEL
+    :param: ll          CHI bins from FISBEL
+    :param: dpp         PHI bin sizes
+    :param: dbb         PSI bin sizes
+    :param: dll         CHI bin sizes
+    :param: n_hours     Number of hours in data set to bin to
+
+    Returns 3D array of shape (n_hours,36,1650) with 36 PHI, 1650 FISBEL bins
+    """
+    # init data array
+    binned_data = np.zeros((n_hours,36,1650))
+    # tolerance of binning (strange effects when binning in angle space)
+    tol = 6 #1e-6
+    
+    phimin_r = np.around(pp-dpp/2,tol)
+    phimax_r = np.around(pp+dpp/2,tol)
+    
+    psimin_r = np.around(bb-dbb/2,tol)
+    psimax_r = np.around(bb+dbb/2,tol)
+    
+    chimin_r = np.around(ll-dll/2,tol)
+    chimax_r = np.around(ll+dll/2,tol)
+    
+    # loops as above
+    for h in tqdm(range(n_hours)):
+        phis = COSI_Data[0]['Phi'][tdx[0,h]['Indices']]
+        psis = COSI_Data[0]['Psi local'][tdx[0,h]['Indices']]
+        chis = COSI_Data[0]['Chi local'][tdx[0,h]['Indices']]
+        for p in range(len(pp)):
+            for c in range(len(ll)):
+                binned_data[h,p,c] = len(np.where((phis >= phimin_r[p]) &
+                                                  (phis < phimax_r[p]) &
+                                                  (psis >= psimin_r[c]) &
+                                                  (psis < psimax_r[c]) &
+                                                  (chis >= chimin_r[c]) &
+                                                  (chis < chimax_r[c]))[0])
+                
+    return binned_data
+
+
+# def get_binned_data_hourly(COSI_Data,tdx,pp,bb,ll,dpp,dbb,dll,n_hours=24):
+#     """
+#     Same as get_binned_data() but for data set with only one day (24 hours)
+#     :param: COSI_Data   COSI data set dictionary from read_COSI_DataSet()
+#     :param: tdx         Time tag indices as hourly binned dictionary from hourly_tags() as (1,24) array
+#     :param: pp          PHI bins from FISBEL
+#     :param: bb          PSI bins from FISBEL
+#     :param: ll          CHI bins from FISBEL
+#     :param: dpp         PHI bin sizes
+#     :param: dbb         PSI bin sizes
+#     :param: dll         CHI bin sizes
+    
+#     Returns 3D array of shape (n_hours,36,1650) with 36 PHI, abd 1650 FISBEL bins
+#     """
+#     # init data array
+#     binned_data = np.zeros((n_hours,36,1650))
+#     # same as above
+#     tol = 1e-6
+#     # loops as above
+#     for h in tqdm(range(n_hours)):
+#         for p in range(len(pp)):
+#             for c in range(len(ll)):
+#                 binned_data[h,p,c] = len(np.where((COSI_Data[0]['Phi'][tdx[0,h]['Indices']] >= np.around(pp[p]-dpp[p]/2,6)) &
+#                                                   (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] < np.around(pp[p]+dpp[p]/2,6)) &
+#                                                   (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] >= np.around(bb[c]-dbb[c]/2,6)) &
+#                                                   (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] < np.around(bb[c]+dbb[c]/2,6)) &
+#                                                   (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] >= np.around(ll[c]-dll[c]/2,6)) &
+#                                                   (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] < np.around(ll[c]+dll[c]/2,6)))[0])
+                
+#     return binned_data
+
+
+
+def get_binned_data_oneday_halfhourwise(COSI_Data,tdx,pp,bb,ll,dpp,dbb,dll):
+    """
+    Same as get_binned_data() but for data set with only one day (48 half-hours)
+    :param: COSI_Data   COSI data set dictionary from read_COSI_DataSet()
+    :param: tdx         Time tag indices as hourly binned dictionary from hourly_tags() as (1,48) array
+    :param: pp          PHI bins from FISBEL
+    :param: bb          PSI bins from FISBEL
+    :param: ll          CHI bins from FISBEL
+    :param: dpp         PHI bin sizes
+    :param: dbb         PSI bin sizes
+    :param: dll         CHI bin sizes
+    
+    Returns 3D array of shape (48,36,1650) with 36 PHI, abd 1650 FISBEL bins
+    """
+    # init data array
+    binned_data = np.zeros((48,36,1650))
+    # same as above
+    tol = 1e-6
+    # loops as above
+    for h in tqdm(range(48)):
+        for p in range(len(pp)):
+            for c in range(len(ll)):
+                binned_data[h,p,c] = len(np.where((COSI_Data[0]['Phi'][tdx[0,h]['Indices']] >= np.around(pp[p]-dpp[p]/2,6)) &
+                                                  (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] < np.around(pp[p]+dpp[p]/2,6)) &
+                                                  (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] >= np.around(bb[c]-dbb[c]/2,6)) &
+                                                  (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] < np.around(bb[c]+dbb[c]/2,6)) &
+                                                  (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] >= np.around(ll[c]-dll[c]/2,6)) &
+                                                  (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] < np.around(ll[c]+dll[c]/2,6)))[0])
+                
+    return binned_data
+
+
+
+
+def get_binned_data_oneday_energy(COSI_Data,tdx,pp,bb,ll,ee,dpp,dbb,dll,dee):
+    """
+    Same as get_binned_data() but for data set with only one day (24 hours)
+    :param: COSI_Data   COSI data set dictionary from read_COSI_DataSet()
+    :param: tdx         Time tag indices as hourly binned dictionary from hourly_tags() as (1,24) array
+    :param: pp          PHI bins from FISBEL
+    :param: bb          PSI bins from FISBEL
+    :param: ll          CHI bins from FISBEL
+    :param: ee          ENERGIES bin centre (self-defined)
+    :param: dpp         PHI bin sizes
+    :param: dbb         PSI bin sizes
+    :param: dll         CHI bin sizes
+    :param: dee         ENERGY bin widths (consistently defined with ee)
+    
+    Returns 3D array of shape (n_e,24,36,1650) with 36 PHI, 1650 FISBEL bins, and n_e ENERGY bins
+    """
+    # init data array
+    n_e = len(ee)
+    binned_data = np.zeros((n_e,24,36,1650))
+    # same as above
+    tol = 1e-6
+    # loops as above
+    for e in tqdm(range(n_e)):
+        for h in tqdm(range(24)):
+            for p in range(len(pp)):
+                for c in range(len(ll)):
+                    binned_data[e,h,p,c] = len(np.where((COSI_Data[0]['Energies'][tdx[0,h]['Indices']] >= (ee[e]-dee[e]/2)) &
+                                                      (COSI_Data[0]['Energies'][tdx[0,h]['Indices']] < (ee[e]+dee[e]/2)) &
+                                                      (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] >= np.around(pp[p]-dpp[p]/2,6)) &
+                                                      (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] < np.around(pp[p]+dpp[p]/2,6)) &
+                                                      (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] >= np.around(bb[c]-dbb[c]/2,6)) &
+                                                      (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] < np.around(bb[c]+dbb[c]/2,6)) &
+                                                      (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] >= np.around(ll[c]-dll[c]/2,6)) &
+                                                      (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] < np.around(ll[c]+dll[c]/2,6)))[0])
                 
     return binned_data
 
@@ -832,6 +1107,36 @@ def GreatCircle(l1,b1,l2,b2,deg=True):
         l1,b1,l2,b2 = np.deg2rad(l1),np.deg2rad(b1),np.deg2rad(l2),np.deg2rad(b2)
 
     return np.sin(b1)*np.sin(b2) + np.cos(b1)*np.cos(b2)*np.cos(l1-l2)    
+
+
+def angular_distance_error(l1,b1,l2,b2,l2_err,b2_err,deg=True):
+    """
+    Calculate angular distance on a sphere from longitude/latitude pairs to other using Great circles
+    in units of deg
+    :param: l1      longitude of point 1 (or several)
+    :param: b1      latitude of point 1 (or several)
+    :param: l2      longitude of point 2
+    :param: b2      latitude of point 2
+    :param: l2_err  longitude uncertainty of point 2
+    :param: b2_err  latitude uncertrainty of point 2
+    :option: deg  option carried over to GreatCricle routine
+    """
+    # calculate uncertainty in angular distance based on Gaussian error propagation
+    # here, uncertainties in l2/b2 only are assumed
+    
+    if deg == True:
+        l1,b1,l2,b2 = np.deg2rad(l1),np.deg2rad(b1),np.deg2rad(l2),np.deg2rad(b2)
+    
+    B = np.cos(b1)*np.sin(b2)*np.cos(l1-l2) - np.sin(b1)*np.cos(b2)
+    
+    L = -np.cos(b1)*np.cos(b2)*np.sin(l1-l2)
+    
+    gc = GreatCircle(l1,b1,l2,b2,deg=False)
+    N2 = 1-gc**2
+
+    sigma_dist2 = (B**2*b2_err**2 + L**2*l2_err*2)/N2
+    
+    return np.sqrt(sigma_dist2)
     
     
 def get_response_with_weights_linear(Response,zenith,azimuth,deg=True,binsize=5,cut=60.0):
@@ -1154,7 +1459,51 @@ def get_response_weights_area(zenith,azimuth,binsize=5,verbose=False,cut=57.4):
     weights = (np.sort(weights))[np.flip(np.argsort(dweights))]
 
     return za_idx.astype(int),weights    
+
+
+def get_response_from_pixelhit_vector(Response,zenith,azimuth,binsize=5,cut=57.4):
+    """
+    Get Compton response from hit pixel for each zenith/azimuth vector(!) input.
+    Binsize determines regular(!!!) sky coordinate grid in degrees.
+
+    :param: zenith        Zenith positions of the source with respect to the instrument (in deg)
+    :param: azimuth       Azimuth positions of the source with respect to the instrument (in deg)
+    :option: binsize      Default 5 deg (matching the sky dimension of the response). If set
+                          differently, make sure it matches the sky dimension as otherwise,
+                          false results may be returned
+    :option: cut          Threshold to cut the response calculation after a certain zenith angle.
+                          Default 57.4 deg (0.1 deg before last pixel reaching beyon 60 deg)
+    """
+
+    # assuming useful input:
+    # azimuthal angle is periodic in the range [0,360[
+    # zenith ranges from [0,180[ 
+
+    # check which pixel (index) was hit on regular grid
+    hit_pixel_zi = np.floor(zenith/binsize)
+    hit_pixel_ai = np.floor(azimuth/binsize)
+
+    # and which pixel centre
+    hit_pixel_z = (hit_pixel_zi+0.5)*binsize
+    hit_pixel_a = (hit_pixel_ai+0.5)*binsize
+
+    # check which zeniths are beyond threshold
+    bad_idx = np.where(hit_pixel_z > cut) 
     
+    # set hit pixels to output array
+    za_idx = np.array([hit_pixel_zi,hit_pixel_ai]).astype(int)
+    
+    #print(za_idx)
+    # weight array includes ones and zeros only (no neighbouring pixels included)
+    # bad_idx get zeros (outside range)
+    weights = np.ones(len(zenith))
+    weights[bad_idx] = 0
+
+    # get responses at pixels
+    rsp = Response[za_idx[0,:],za_idx[1,:],:]*weights[:,None]
+
+    return rsp
+
 
 def construct_sc_matrix(scx_l, scx_b, scy_l, scy_b, scz_l, scz_b):
     """
@@ -1527,3 +1876,868 @@ def lnprob_PSsearchFlux(theta, data, response_sky, xs, ys, zs, response_bg,Texp,
         return -np.inf
     # add prior to likelihood and return posterior
     return lp + lnlike_PSsearchFlux(theta, data, response_sky, xs, ys, zs, response_bg,Texp,area_flag)
+
+
+
+
+
+
+
+
+
+
+
+def GreatCircleGrid(l1,b1,l2,b2,deg=True):
+    """
+    Calculate the Great Circle length on a sphere from longitude/latitude pairs to others
+    in units of rad on a unit sphere
+    :param: l1    longitude of points Ai
+    :param: b1    latitude of points Ai
+    :param: l2    longitude of point Bj
+    :param: b2    latitude of point Bj
+    :option: deg  Default True to convert degree input to radians for trigonometric function use
+                  If False, radian input is assumed
+    """
+    if deg == True:
+        l1,b1,l2,b2 = np.deg2rad(l1),np.deg2rad(b1),np.deg2rad(l2),np.deg2rad(b2)
+
+    L1, L2 = np.meshgrid(l1,l2)
+    B1, B2 = np.meshgrid(b1,b2)
+        
+    return np.sin(B1)*np.sin(B2) + np.cos(B1)*np.cos(B2)*np.cos(L1-L2)
+
+
+
+def zenaziGrid(scx_l, scx_b, scy_l, scy_b, scz_l, scz_b, src_l, src_b):
+    """
+    # from spimodfit zenazi function (with rotated axes (optical axis for COSI = z)
+    # calculate angular distance wrt optical axis in zenith (theta) and
+    # azimuth (phi): (zenazi function)
+    # input: spacecraft pointing directions sc(xyz)_l/b; source coordinates src_l/b
+    # output: source coordinates in spacecraft system frame
+    
+    Calculate zenith and azimuth angle of a point (a source) given the orientations
+    of an instrument (or similar) in a certain coordinate frame (e.g. galactic).
+    Each point in galactic coordinates can be uniquely mapped into zenith/azimuth of
+    an instrument/observer/..., by using three Great Circles in x/y/z and retrieving
+    the correct angles
+    
+    :param: scx_l      longitude of x-direction/coordinate
+    :param: scx_b      latitude of x-direction/coordinate
+    :param: scy_l      longitude of y-direction/coordinate
+    :param: scy_b      latitude of y-direction/coordinate
+    :param: scz_l      longitude of z-direction/coordinate
+    :param: scz_b      latitude of z-direction/coordinate
+    :param: src_l      SOURCEgrid longitudes
+    :param: src_b      SOURCEgrid latitudes
+    
+    """
+    # make matrices for response calculation on a pre-defined grid
+    SCZ_L, SRC_L = np.meshgrid(scz_l,src_l)
+    SCZ_B, SRC_B = np.meshgrid(scz_b,src_b)
+    # I cannot describe this is words, please google zenith/azimuth and find a picture
+    # where you understand which angles are being calculated
+    # Zenith is the distance from the optical axis (here z)
+    costheta = GreatCircleGrid(scz_l,scz_b,src_l,src_b)                                                                        
+    # Azimuth is the combination of the remaining two
+    
+    SCX_L, SRC_L = np.meshgrid(scx_l,src_l)
+    SCX_B, SRC_B = np.meshgrid(scx_b,src_b)    
+    cosx = GreatCircle(SCX_L,SCX_B,SRC_L,SRC_B)
+    SCY_L, SRC_L = np.meshgrid(scy_l,src_l)
+    SCY_B, SRC_B = np.meshgrid(scy_b,src_b)  
+    cosy = GreatCircle(SCY_L,SCY_B,SRC_L,SRC_B)
+    
+    # check exceptions
+    # maybe not for vectorisation
+    """
+    if costheta.size == 1:
+        if (costheta > 1.0):
+            costheta = 1.0
+        if (costheta < -1.0):
+            costheta = -1.0
+    else:
+        costheta[costheta > 1.0] = 1.0
+        costheta[costheta < -1.0] = -1.0
+    """
+    # theta = zenith
+    theta = np.rad2deg(np.arccos(costheta))
+    # phi = azimuth
+    phi = np.rad2deg(np.arctan2(cosx,cosy))
+    
+    # make azimuth going from 0 to 360 deg
+    if phi.size == 1:
+        if (phi < 0):
+            phi += 360
+    else:
+        phi[phi < 0] += 360
+    
+    return theta,phi    
+
+
+
+def construct_pointings(COSI_Data,idx=None,angle_threshold=5,days=[0]):
+    """
+    Construct a list of 'stable' pointings during a steadily moving COSI observation:
+    Depending on the angular threshold, a number of triggers is collected into one time bin,
+    making an average observation, Xpointing, Ypointing, ZPointing, during this time.
+    This defines the exposure time (not dead-time corrected) for a particular pointing.
+    :param:  COSI_Data          COSI data set dictionary from read_COSI_DataSet()
+    :option: idx                Default = None: using only chosen indices (e.g. for one hour of observation)
+    :option: angle_threshold    Default = 5 (deg): if COSI changes by more than angle_threshold, the accumulation
+                                of triggers starts over, defining a new pointing.
+    :option: day                Default = 0: if data set not separated by days, only index 0 is looped over
+                                Alternative: index list of days to loop over in addition
+
+    Output: xs,ys,zs,dt (,so,save_times,save_f,tot_time)
+            Pointings in x-, y-, z-direction, and observation time for each set of triggers.
+            Warning: this is a bit sloppy since the end time is added twice to make time bins
+                     (this may change when a complete housekeeping / pointing definition file is created)
+    """
+    
+    save_xs_all = []
+    save_ys_all = []
+    save_zs_all = []
+    save_times_all = []
+    
+    for d in days:
+
+        # if all indices are used
+        if idx == None:
+            # remember this
+            rem = 1
+            # number of photons (triggers)
+            n_ph = len(COSI_Data[d]['Zpointings'])
+            idx = np.arange(n_ph)
+        # only chosen indices
+        else:
+            n_ph = len(COSI_Data[d]['Zpointings'][idx])
+
+        ath = angle_threshold
+
+        zs = np.rad2deg(COSI_Data[d]['Zpointings'][idx])
+        ys = np.rad2deg(COSI_Data[d]['Xpointings'][idx])
+        xs = np.rad2deg(COSI_Data[d]['Ypointings'][idx])
+        times = COSI_Data[d]['TimeTags'][idx]
+        # sorting of time since, especially for simulations, the time stamps may be arbitrary and not in sequnce
+        so = np.argsort(times)
+
+        # cross-check number of photons
+        n_ph2 = len(zs[so,0])
+
+        if n_ph != n_ph2:
+            print('something went wrong ...')
+
+        # begin iterative combination of triggers up to angle_threshold
+        # first photon
+        i = 0
+        save_zs = [zs[so[i],:]]
+        save_ys = [ys[so[i],:]]
+        save_xs = [xs[so[i],:]]
+        save_times = []
+        save_f = [0]
+            
+            
+        # next photon wrt to first trigger in block
+        for f in range(n_ph):
+            # calculate angular distance in all 3 directions (very important because non-circular response)
+            dz = angular_distance(zs[so[f],0],zs[so[f],1],zs[so[i],0],zs[so[i],1])
+            dy = angular_distance(ys[so[f],0],ys[so[f],1],ys[so[i],0],ys[so[i],1])
+            dx = angular_distance(xs[so[f],0],xs[so[f],1],xs[so[i],0],xs[so[i],1])
+            # time bin (see warning above, and work-around below)
+            dt = times[so[f]]-times[so[i]]
+            # if any of the angles is greater than threshold, save the first trigger as average pointing
+            # this is arbitrary and could be any point inside the block; it only defines a point in which the stability is
+            # angle_threshold degrees.
+            if ((dz >= ath) | (dy >= ath) | (dx >= ath)) | (f == n_ph-1):
+                save_zs.append(zs[so[f],:])
+                save_ys.append(ys[so[f],:])
+                save_xs.append(xs[so[f],:])
+                save_times.append(dt)
+                save_f.append(f)
+                i = f # make last to first and repeat until all photons are inside
+        
+        if rem == 1:
+            idx = None
+        
+        save_times.append(dt) # append last time segment twice to have same number of entries (last entry can be important)
+        
+        save_xs_all = save_xs_all + save_xs
+        save_ys_all = save_ys_all + save_ys
+        save_zs_all = save_zs_all + save_zs
+        save_times_all = save_times_all + save_times
+        
+    save_zs_all = np.array(save_zs_all)
+    save_ys_all = np.array(save_ys_all)
+    save_xs_all = np.array(save_xs_all)
+    save_times_all = np.array(save_times_all)
+    # calculate additional information (maybe needed later on, not returned here)
+    save_f = np.array(save_f)
+    tot_time = np.diff(minmax(times)) + dt # same here
+    tw = save_times/tot_time
+                       
+    return save_xs_all,save_ys_all,save_zs_all,save_times_all#,so#,tw,save_f,tot_time
+
+
+
+def calc_PS_response(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,cut=60):
+    """
+    Calculate the response of a point source at galactic coordinate position (l/b) with flux F_sky, using the
+    NonZeroResponseGrid on a data set of (x,y,z)-pointings an exposures dt. The response calculation can be
+    performed in different ways.
+    :param: xs            Pointing definition in x-direction
+    :param: ys            Pointing definition in y-direction
+    :param: zs            Pointing definition in z-direction
+    :param: dt            Pointing exposure time
+    :param: l             Longitude position of source
+    :param: b             Latitude position of source
+    :param: response_sky  Sky response grid to use for calculation
+    :param: F_sky         Flux of source
+    :param: response_calc_type:   Default: 'look-up', i.e. uses values of response grid as their are to calculate
+                                           response (fastest, doesn't take neighbouring pixels in response into
+                                           account)
+                                           'and-dist': weighting with angular distance of 'four hit pixels'
+                                           'lin-dist': weighting with euclidean distance of 'four hit pixels'
+                                           'area: weighting with overlapping area of 'four hit pixels' (should be 
+                                                  the most correct, however buggy because pixels are not assigned
+                                                  correctly).
+    :option: cut          Threshold for field of view, default 60 deg
+                                           
+    Output: returns response (accumulated for hours in observation) in the same shape as the sky response is
+    given (i.e. integrated over the sky).
+    """
+    # define zeniths and azimuths for given source position l/b
+    zens,azis = zenazi(xs[:,0],xs[:,1],
+                       ys[:,0],ys[:,1],
+                       zs[:,0],zs[:,1],
+                       l,b)
+
+    # check which response calculation should be used
+    # the get_response_...() functions return values in units of 1/cm2/sr
+    # (at source position = delta function with sr units);
+    # multiplying by dt gives s*counts*cm2/sr*sr = s*counts*cm2
+    if response_calc_type == 'look-up':
+        sky_response = get_response_from_pixelhit_vector(response_sky,zens,azis,cut=cut)*dt[:,None]
+    elif response_calc_type == 'ang-dist':
+        sky_response = get_response_with_weights(response_sky,zens,azis,cut=cut)*dt[:,None]
+    elif response_calc_type == 'lin-dist':
+        sky_response = get_response_with_weights_linear(response_sky,zens,azis,cut=cut)*dt[:,None]
+    elif response_calc_type == 'area':
+        sky_response = get_response_with_weights_area(response_sky,zens,azis,cut=cut)*dt[:,None]
+    else:
+        sky_response = get_response_from_pixelhit_vector(response_sky,zens,azis,cut=cut)*dt[:,None]
+    
+    # multiplying by flux (1/cm2/s) gives s*counts*cm2/cm2/s = counts (expected counts for THIS model)
+    return F_sky*sky_response
+
+
+
+def calc_PS_response24(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,cut=60):
+    """
+    Output: returns response of a point source at l/b given instrument aspects and time, at a certain flux level F_sky
+    """
+    sky_response = calc_PS_response(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,cut=60)
+    
+    cdt = np.cumsum(dt)
+
+    sky_response24 = np.zeros((24,4587))
+    for c in range(24):
+        cdx = np.where((cdt > c*3600) & (cdt <= (c+1)*3600))
+        sky_response24[c,:] = np.sum(sky_response[cdx[0],:],axis=0)
+    
+    # calculate sky model count expectaion
+    model_sky = sky_response24
+    
+    return sky_response24
+
+
+def calc_PS_response_hourly(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,hours,cut=60):
+    """
+    Calculate the response of a point source at galactic coordinate position (l/b) with flux F_sky, using the
+    NonZeroResponseGrid on a data set of (x,y,z)-pointings an exposures dt for the number of hours in the data
+    set. The response calculation can be performed in different ways.
+    :param: xs            Pointing definition in x-direction
+    :param: ys            Pointing definition in y-direction
+    :param: zs            Pointing definition in z-direction
+    :param: dt            Pointing exposure time
+    :param: l             Longitude position of source
+    :param: b             Latitude position of source
+    :param: response_sky  Sky response grid to use for calculation
+    :param: F_sky         Flux of source
+    :param: response_calc_type:   Default: 'look-up', i.e. uses values of response grid as their are to calculate
+                                           response (fastest, doesn't take neighbouring pixels in response into
+                                           account)
+                                           'and-dist': weighting with angular distance of 'four hit pixels'
+                                           'lin-dist': weighting with euclidean distance of 'four hit pixels'
+                                           'area: weighting with overlapping area of 'four hit pixels' (should be 
+                                                  the most correct, however buggy because pixels are not assigned
+                                                  correctly).
+    :param: hours         Number of hours to calculate response (usually whole data set)
+    :option: cut          Threshold for field of view, default 60 deg
+                                           
+    Output: returns response (accumulated for hours in observation) in the same shape as the sky response is
+    given (i.e. integrated over the sky).
+    """
+    # calculate sky response for each defined pointing
+    sky_response = calc_PS_response(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,cut=60)
+    
+    # get cumulative some of observation times to accumulate until end of each hour
+    cdt = np.cumsum(dt)
+    
+    # pre-define response
+    sky_response_hh = np.zeros((hours,response_sky.shape[2]))
+    # loop until all hours of definition
+    for c in range(hours):
+        cdx = np.where((cdt > c*3600) & (cdt <= (c+1)*3600))
+        sky_response_hh[c,:] = np.sum(sky_response[cdx[0],:],axis=0)
+    
+    # calculate sky model count expectaion
+    model_sky = sky_response_hh
+    
+    return sky_response_hh
+
+
+
+def load_BackGroundResponse(nonzero=True):
+    """
+    Loading the background response in (phi,psi,chi) data space from 9 working detectors:
+    :option: nonzero    Default = True: Only return the non-zero elements of the background response
+                        (Since the background response is created from adding up all photons in the
+                        respective bins from the complete (partial) flight, there will never be any
+                        other photons occuring exept for those in the non-zero background model).
+                        If True, returns also indices of the non-zero entries (for later use of sky response).
+
+    Output: 4587-element array (if non-zero) containing the COSI background response at any time.
+    """
+    # loading complete background model (also zeros) from the binned data of all good times
+    with np.load('binned_data_511_GTI.npz') as content:
+        binned_data_GTI = content['binned_data_GTI']
+
+    # normalise to 1
+    background_response_full = np.nansum(binned_data_GTI[:,:,:,:],axis=(0,1)).ravel()
+    background_response_full = background_response_full/np.nansum(background_response_full)
+    
+    # select only non-zero elements
+    if (nonzero == True):
+        
+        calc_this = np.where(background_response_full != 0)[0].astype(int)
+        background_response = background_response_full[calc_this]
+        
+        return background_response,calc_this
+    
+    # or return all (much overhead)
+    else:
+        return background_response_full
+    
+    
+
+def load_NonZeroResponseGrid(calc_this=None):
+    """
+    Loading the sky response in (phi,psi,chi) data space from 9 working detectors:
+    :option: calc_this  Default = None: Returns the sky response grid in a standard format using
+                        using 5x5 deg2 sky pixels, and a 36(phi) * 1650(psi x chi) = 59400 element
+                        response of the 511 keV line from responsecreator in MEGAlib. If calc_this
+                        is set to an index array, only those entries will be return (e.g. from
+                        load_BackGroundResponse()).
+    
+    Output: (36, 72, 59400)-element array ( (36, 72, 4587) if non-zero) containing the COSI sky response
+            for all zenith-azimuth angles up to 60 deg in the FoV (511 keV line).
+    """
+    # load from numpy save file
+    with np.load('response/ResponseGrid511_v3.npz',) as content:
+        ResponseGrid1 = content['response_grid_normed']
+        l3cen = content['l3cen']
+        b3cen = content['b3cen']
+        l3wid = content['l3wid']
+        b3wid = content['b3wid']
+        L3 = content['L3']
+        B3 = content['B3']
+    
+    # check if chosen indices
+    if (np.any(calc_this) == None):
+        # if calc_this is not set, return all values (e.g. to re-evaluate, re-bin, etc. of the response)
+        NonZeroResponseGrid = ResponseGrid1.reshape(36,72,59400)
+        
+    else:
+        # use only non-zero entries from calc_this index array
+        NonZeroResponseGrid = (ResponseGrid1.reshape(36,72,59400))[:,:,calc_this]
+        
+    return NonZeroResponseGrid
+
+
+
+
+def get_image_response_from_pixelhit_hourly(Response,zenith,azimuth,dt,n_hours,binsize=5,cut=57.4):
+    """
+    Get Compton response from hit pixel for each zenith/azimuth vector(!) input.
+    Binsize determines regular(!!!) sky coordinate grid in degrees.
+
+    :param: zenith        Zenith positions of all points of predefined sky grid with
+                          respect to the instrument (in deg)
+    :param: azimuth       Azimuth positions of all points of predefined sky grid with
+                          respect to the instrument (in deg)
+    :option: binsize      Default 5 deg (matching the sky dimension of the response). If set
+                          differently, make sure it matches the sky dimension as otherwise,
+                          false results may be returned
+    :option: cut          Threshold to cut the response calculation after a certain zenith angle.
+                          Default 57.4 deg (0.1 deg before last pixel reaching beyon 60 deg)
+    :param: n_hours       Numberof hours in observation
+    """
+
+    # assuming useful input:
+    # azimuthal angle is periodic in the range [0,360[
+    # zenith ranges from [0,180[ 
+
+    # check which pixel (index) was hit on regular grid
+    hit_pixel_zi = np.floor(zenith/binsize)
+    hit_pixel_ai = np.floor(azimuth/binsize)
+
+    # and which pixel centre
+    hit_pixel_z = (hit_pixel_zi+0.5)*binsize
+    hit_pixel_a = (hit_pixel_ai+0.5)*binsize
+
+    # check which zeniths are beyond threshold
+    bad_idx = np.where(hit_pixel_z > cut) 
+    
+    # set hit pixels to output array
+    za_idx = np.array([hit_pixel_zi,hit_pixel_ai]).astype(int)
+    
+    nz = zenith.shape[2]
+    
+    n_lon = int(360/binsize)
+    n_lat = int(180/binsize)
+    
+    l_arrg = np.linspace(-180,180,(360/binsize)+1)
+    b_arrg = np.linspace(-90,90,(180/binsize)+1)
+    L_ARRg, B_ARRg = np.meshgrid(l_arrg,b_arrg)
+    l_arr = l_arrg[0:-1]+binsize/2
+    b_arr = b_arrg[0:-1]+binsize/2
+    L_ARR, B_ARR = np.meshgrid(l_arr,b_arr)
+    
+    # take care of regular grid by applying weighting with latitude
+    weights = ((binsize*np.pi/180)**2*np.cos(np.deg2rad(B_ARR))).repeat(nz).reshape(n_lat,n_lon,nz)
+    weights[bad_idx] = 0
+
+    # get responses at pixels
+    
+    image_response = np.zeros((n_hours,n_lat,n_lon,4587))
+    h = 0
+    cdt = np.cumsum(dt)
+    for obs in tqdm(range(len(dt))):
+        if not (h <= cdt[obs]/3600 <= h+1):
+            h += 1
+        # check if something is weird in the data set (e.g. more hours than introduced)
+        if h >= n_hours:
+            h -= 1
+        # this calculation is basically a look-up of the response entries. In general, weighting (integration) with the true shape can be introduced, however with a lot more computation time (Simpson's rule in 2D ...)
+        image_response[h,:,:,:] += Response[za_idx[0,:,:,obs],za_idx[1,:,:,obs],:]*weights[:,:,obs,None]*dt[obs]
+        
+    return image_response
+
+    
+
+    
+    
+def Gaussian2D(ll,bb,A0,l0,b0,sl,sb,binsize=5):
+    #return A0/(2*np.pi*sl*sb*(np.pi/180)**2)*np.exp(-(ll-l0)**2/(2*sl**2)-(bb-b0)**2/(2*sb**2))
+    shape = np.exp(-(ll-l0)**2/(2*sl**2)-(bb-b0)**2/(2*sb**2))
+    norm = np.sum(shape*(binsize*np.pi/180)*(np.sin(np.deg2rad(bb+binsize/2)) - np.sin(np.deg2rad(bb-binsize/2))))
+    val = A0*shape/norm
+    return val
+    
+
+    
+    
+    
+def make_bg_cuts(cuts,Nh):
+    cuts = [1] + cuts + [1e99]
+    bg_cuts = np.zeros(Nh)
+    cidx = 0
+    for i in range(1,Nh+1):
+        #print(i)
+        if (cuts[cidx] <= i < cuts[cidx+1]):
+            bg_cuts[i-1] = cuts[cidx]
+        else:
+            cidx += 1
+            bg_cuts[i-1] = cuts[cidx]
+            
+    Ncuts = len(np.unique(bg_cuts))
+    idx_arr = np.ones(Nh)
+    for i in range(Ncuts):
+        idx_arr[np.where(bg_cuts == cuts[i+1])[0]] = i+1
+    
+    return bg_cuts.astype(int), idx_arr.astype(int), Ncuts
+
+
+
+def read_COSI_DataSet_PE(dor):
+    """
+    Reads in all MEGAlib .tra (or .tra.gz) files in given directory 'dor'
+    If full flight/mission data set is read in, e.g. from /FlightData_Processed_v4/ with standard names,
+    the data set is split up into days and hours of observations. Otherwise, everything is lumped together.
+    Returns COSI data set as a dictionary of the form
+    COSI_DataSet = {'Day':trafiles[i][StrBeg:StrBeg+StrLen],
+                    'Energies':erg,
+                    'TimeTags':tt,
+                    'Xpointings':np.array([lonX,latX]).T,
+                    'Ypointings':np.array([lonY,latY]).T,
+                    'Zpointings':np.array([lonZ,latZ]).T,
+                    'Phi':phi,
+                    'Chi local':chi_loc,
+                    'Psi local':psi_loc,
+                    'Distance':dist,
+                    'Chi galactic':chi_gal,
+                    'Psi galactic':psi_gal}
+    :param: dor    Path of directory in which data set is stored
+    """
+    
+    # Search for files in directory
+    trafiles = []
+    for dirpath, subdirs, files in os.walk(dor):
+        for file in files:
+            if glob.fnmatch.fnmatch(file,"*.tra*"):
+                trafiles.append(os.path.join(dirpath, file))
+
+    # sort files (only with standard names)
+    trafiles = sorted(trafiles)
+
+    # string lengths to get day as key
+    StrBeg = len(dor)+len('OP_')
+    StrLen = 6
+
+    # read COSI data
+    COSI_Data = []
+    
+    # loop over all tra files
+    for i in tqdm(range(len(trafiles))):
+        
+        Reader = M.MFileEventsTra()
+        if Reader.Open(M.MString(trafiles[i])) == False:
+            print("Unable to open file " + trafiles[i] + ". Aborting!")
+            quit()
+            
+        erg = []   # Photo energy
+        tt = []    # Time tag
+        et = []    # Event Type
+        latX = []  # latitude of X direction of spacecraft
+        lonX = []  # lontitude of X direction of spacecraft
+        latZ = []  # latitude of Z direction of spacecraft
+        lonZ = []  # longitude of Z direction of spacecraft
+        phi = []   # Compton scattering angle
+        chi_loc = [] # measured data space angle chi
+        psi_loc = [] # measured data space angle psi
+        dist = []    # First lever arm
+        chi_gal = [] # measured gal angle chi (lon direction)
+        psi_gal = [] # measured gal angle psi (lat direction)
+
+        while True:
+            Event = Reader.GetNextEvent()
+            if not Event:
+                break
+# read all photo events # !!!            if Event.GetEventType() == M.MPhysicalEvent.:
+            # all calculations and definitions taken from /MEGAlib/src/response/src/MResponseImagingBinnedMode.cxx
+            erg.append(Event.Ei()) # Total Compton Energy
+            tt.append(Event.GetTime().GetAsSeconds()) # Time tag in seconds since ...
+            et.append(Event.GetEventType()) # Event type (0 = Compton, 4 = Photo)
+            latX.append(Event.GetGalacticPointingXAxisLatitude()) # x axis of space craft pointing at GAL latitude
+            lonX.append(Event.GetGalacticPointingXAxisLongitude()) # x axis of space craft pointing at GAL longitude
+            latZ.append(Event.GetGalacticPointingZAxisLatitude()) # z axis of space craft pointing at GAL latitude
+            lonZ.append(Event.GetGalacticPointingZAxisLongitude()) # z axis of space craft pointing at GAL longitude
+
+        erg = np.array(erg)
+        tt = np.array(tt)
+        et = np.array(et)
+        latX = np.array(latX)
+        lonX = np.array(lonX)
+        lonX[lonX > np.pi] -= 2*np.pi
+        latZ = np.array(latZ)
+        lonZ = np.array(lonZ)
+        lonZ[lonZ > np.pi] -= 2*np.pi
+        phi = np.array(phi)
+        chi_loc = np.array(chi_loc)
+        chi_loc[chi_loc < 0] += 2*np.pi ### TS: MIGHT BE WRONG!
+        psi_loc = np.array(psi_loc)
+        dist = np.array(dist)
+        chi_gal = np.array(chi_gal)
+        psi_gal = np.array(psi_gal)
+        # construct Y direction from X and Z direction
+        lonlatY = construct_scy(np.rad2deg(lonX),np.rad2deg(latX),np.rad2deg(lonZ),np.rad2deg(latZ))
+        lonY = np.deg2rad(lonlatY[0])
+        latY = np.deg2rad(lonlatY[1])
+        # avoid negative zeros
+        chi_loc[np.where(chi_loc == 0.0)] = np.abs(chi_loc[np.where(chi_loc == 0.0)])
+        
+        # make observation dictionary
+        COSI_DataSet = {'Day':trafiles[i][StrBeg:StrBeg+StrLen],
+                        'Energies':erg,
+                        'TimeTags':tt,
+                        'Xpointings':np.array([lonX,latX]).T,
+                        'Ypointings':np.array([lonY,latY]).T,
+                        'Zpointings':np.array([lonZ,latZ]).T,
+                        'Phi':phi,
+                        'Chi local':chi_loc,
+                        'Psi local':psi_loc,
+                        'Distance':dist,
+                        'Chi galactic':chi_gal,
+                        'Psi galactic':psi_gal}
+    
+        COSI_Data.append(COSI_DataSet)
+
+    return COSI_Data
+
+
+
+
+def get_binned_data_hourly_energy(COSI_Data,tdx,pp,bb,ll,ee,dpp,dbb,dll,dee,n_hours):
+    """
+    Same as get_binned_data() but for data set with only one day (24 hours)
+    :param: COSI_Data   COSI data set dictionary from read_COSI_DataSet()
+    :param: tdx         Time tag indices as hourly binned dictionary from hourly_tags() as (1,24) array
+    :param: pp          PHI bins from FISBEL
+    :param: bb          PSI bins from FISBEL
+    :param: ll          CHI bins from FISBEL
+    :param: ee          ENERGIES bin centre (self-defined)
+    :param: dpp         PHI bin sizes
+    :param: dbb         PSI bin sizes
+    :param: dll         CHI bin sizes
+    :param: dee         ENERGY bin widths (consistently defined with ee)
+    
+    Returns 3D array of shape (n_e,n_hours,36,1650) with 36 PHI, 1650 FISBEL bins, and n_e ENERGY bins
+    """
+    # init data array
+    n_e = len(ee)
+    binned_data = np.zeros((n_e,n_hours,36,1650))
+    # same as above
+    tol = 1e-6
+    # loops as above
+    for e in tqdm(range(n_e)):
+        for h in tqdm(range(n_hours)):
+            for p in range(len(pp)):
+                for c in range(len(ll)):
+                    binned_data[e,h,p,c] = len(np.where((COSI_Data[0]['Energies'][tdx[0,h]['Indices']] >= (ee[e]-dee[e]/2)) &
+                                                      (COSI_Data[0]['Energies'][tdx[0,h]['Indices']] < (ee[e]+dee[e]/2)) &
+                                                      (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] >= np.around(pp[p]-dpp[p]/2,6)) &
+                                                      (COSI_Data[0]['Phi'][tdx[0,h]['Indices']] < np.around(pp[p]+dpp[p]/2,6)) &
+                                                      (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] >= np.around(bb[c]-dbb[c]/2,6)) &
+                                                      (COSI_Data[0]['Psi local'][tdx[0,h]['Indices']] < np.around(bb[c]+dbb[c]/2,6)) &
+                                                      (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] >= np.around(ll[c]-dll[c]/2,6)) &
+                                                      (COSI_Data[0]['Chi local'][tdx[0,h]['Indices']] < np.around(ll[c]+dll[c]/2,6)))[0])
+                
+    return binned_data
+
+
+
+
+# prior for point source search
+fovth = cut
+def lnprior_PSsearchFlux_hourly(theta,zs):
+    """
+    Return log-prior probability of a parameter set theta,
+    setting normal, weakly informative, priors on the flux
+    and background scaling, plus a uniform circular region
+    inside the field of view (and normal priors on the
+    position (also weakly informative); now excluded)
+    :param: theta     Array of fitted parameters with
+                      theta[0] = F_sky (sky flux)
+                      theta[1] = A_bg (BG scaling)
+                      theta[2] = Gal. Lon. of source (deg)
+                      theta[3] = Gal. Lat. of source (deg)
+    :param: zs        Array of pointing directions to calculate
+                      threshold for outside field of view
+    
+    """
+    # define fit parameters
+    F_sky,A_bg,l,b = theta
+    # normal prior on flux (typically 1e-6..1e-1)
+    mu_F_sky = 0
+    sigma_F_sky = 1
+    # normal prior on BG
+    mu_A_bg = 100
+    sigma_A_bg = 10000
+
+    # normal prior on source position (mean of observation) as centre
+    mu_l = 0
+    sigma_l = 20 # within 3 sigma, (= 60 deg), everything can be captured
+    mu_b = 0
+    sigma_b = 20
+    
+    # get distance to outermost observations
+    dists = angular_distance(zs[:,0],zs[:,1],l,b,deg=True)
+    
+    # if distance of source is larger than 60 deg to outermost points, return -infinity
+    # also check for inside "one sky"
+    
+    # check fov of ANY pointing/observation as it might also only be seen at one instance in time
+    if np.any(dists < fovth) & ((-90 <= b <= 90) & (-180 < l <= 180)):
+        return -0.5*(F_sky-mu_F_sky)**2/sigma_F_sky**2 -0.5*(A_bg-mu_A_bg)**2/sigma_A_bg**2
+    # commented normal prior on source position (not included now because Gaussian on a sphere returns
+    # strange patterns, but not a Gaussian: -0.5*(l-mu_l)**2/sigma_l**2 -0.5*(b-mu_b)**2/sigma_b**2
+    else:
+        return -np.inf
+    
+# likelihood for point source search
+def lnlike_PSsearchFlux_hourly(theta, data, response_sky, xs, ys, zs, response_bg, dt, response_calc_type, n_hours):
+    """
+    Return the Poisson log-likelihood of the fitting model
+    with parameters theta, given the data. Using instrument
+    orientation, to calculate sky response on the fly and
+    background model response to fit for flux, BG, l, b;
+    in a data set consistent of n_hours and len(dt) pointings:
+    :param: theta           Array of fitted parameters with
+                            theta[0] = F_sky (sky flux)
+                            theta[1] = A_bg (BG scaling)
+                            theta[2] = Gal. Lon. of source (deg)
+                            theta[3] = Gal. Lat. of source (deg)
+    :param: response_sky    Response grid with regular sky dimension
+    :param: xs              Array of pointing x-directions
+    :param: ys              Array of pointing y-direction
+    :param: zs              Array of pointing directions to calculate
+                            threshold for outside field of view
+    :param: response_bg     Background response, valid for all times
+    :param: dt              Exposure times according to (x,y,z)-directions
+    :param: n_hours         Number of hours in data set
+    """
+    # define fit parameters
+    F_sky,A_bg,l,b = theta
+    
+    # calculate sky model response (point source)
+    model_sky = calc_PS_response_hourly(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,n_hours,cut=cut)
+
+    # calculate BG model count expectation
+    # this assumes a flat background (or a background that has already been scaled with a tracer)
+    # !!! This fits ONLY ONE background parameter!!!
+    bg_response_hourly = np.repeat(response_bg,n_hours).reshape(response_sky.shape[2],n_hours).T
+    model_bg = A_bg*bg_response_hourly
+    # add together
+    model_tot = model_sky + model_bg
+
+    # check for any negative model counts to return -infinity (zero counts model predictions are allowed)
+    if np.any(model_tot < 0):
+        return -np.inf
+    else:
+        # calculate Poisson likelihood
+        stat = -2*np.sum(model_tot - data*np.nan_to_num(np.log(model_tot)))
+        return stat
+
+# Calculate posterior
+def lnprob_PSsearchFlux_hourly(theta, data, response_sky, xs, ys, zs, response_bg, dt, response_calc_type, n_hours):
+    """
+    Return the log-posterior of the fitting model using above-
+    defined likelihood and prior.
+    :param: theta           Array of fitted parameters with
+                            theta[0] = F_sky (sky flux)
+                            theta[1] = A_bg (BG scaling)
+                            theta[2] = Gal. Lon. of source (deg)
+                            theta[3] = Gal. Lat. of source (deg)
+    :param: response_sky    Response grid with regular sky dimension
+    :param: xs              Array of pointing x-directions
+    :param: ys              Array of pointing y-direction
+    :param: zs              Array of pointing directions to calculate
+                            threshold for outside field of view
+    :param: response_bg     Background response, valid for all times
+    :param: dt              Exposure/observation time per pointing
+    :param: response_calc_type:   Default: 'look-up', i.e. uses values of response grid as their are to calculate
+                                       response (fastest, doesn't take neighbouring pixels in response into
+                                       account)
+                                       'and-dist': weighting with angular distance of 'four hit pixels'
+                                       'lin-dist': weighting with euclidean distance of 'four hit pixels'
+                                       'area: weighting with overlapping area of 'four hit pixels' (should be 
+                                              the most correct, however buggy because pixels are not assigned
+                                              correctly).
+    :param: n_hours         Number of hours in data set
+    """
+    # get prior
+    lp = lnprior_PSsearchFlux_hourly(theta,zs)
+    if not np.isfinite(lp):
+        return -np.inf
+    # add prior to likelihood and return posterior
+    return lp + lnlike_PSsearchFlux_hourly(theta, data, response_sky, xs, ys, zs, response_bg, dt, response_calc_type, n_hours)
+
+
+
+
+
+# likelihood for point source search with background tracer
+def lnlike_PSsearchFlux_hourly_bgtracer(theta, data, response_sky, xs, ys, zs, response_bg, dt,
+                                        response_calc_type, n_hours, tracer):
+    """
+    Return the Poisson log-likelihood of the fitting model
+    with parameters theta, given the data. Using instrument
+    orientation, to calculate sky response on the fly and
+    background model response to fit for flux, BG, l, b;
+    in a data set consistent of n_hours and len(dt) pointings:
+    :param: theta           Array of fitted parameters with
+                            theta[0] = F_sky (sky flux)
+                            theta[1] = A_bg (BG scaling)
+                            theta[2] = Gal. Lon. of source (deg)
+                            theta[3] = Gal. Lat. of source (deg)
+    :param: response_sky    Response grid with regular sky dimension
+    :param: xs              Array of pointing x-directions
+    :param: ys              Array of pointing y-direction
+    :param: zs              Array of pointing directions to calculate
+                            threshold for outside field of view
+    :param: response_bg     Background response, valid for all times
+    :param: dt              Exposure times according to (x,y,z)-directions
+    :param: n_hours         Number of hours in data set
+    :param: tracer          Background tracer with the same number of entries as n_hours
+    """
+    # define fit parameters
+    F_sky,A_bg,l,b = theta
+    
+    # calculate sky model response (point source)
+    model_sky = calc_PS_response_hourly(xs,ys,zs,dt,l,b,response_sky,F_sky,response_calc_type,n_hours,cut=cut)
+
+    # calculate BG model count expectation
+    # this assumes a flat background (or a background that has already been scaled with a tracer)
+    # !!! This fits ONLY ONE background parameter!!!
+    bg_response_hourly = np.repeat(response_bg,n_hours).reshape(response_sky.shape[2],n_hours).T*tracer[:,None]
+    model_bg = A_bg*bg_response_hourly
+    # add together
+    model_tot = model_sky + model_bg
+
+    # check for any negative model counts to return -infinity (zero counts model predictions are allowed)
+    if np.any(model_tot < 0):
+        return -np.inf
+    else:
+        # calculate Poisson likelihood
+        stat = -2*np.sum(model_tot - data*np.nan_to_num(np.log(model_tot)))
+        return stat
+
+# Calculate posterior
+def lnprob_PSsearchFlux_hourly_bgtracer(theta, data, response_sky, xs, ys, zs, response_bg, dt,
+                                        response_calc_type, n_hours, tracer):
+    """
+    Return the log-posterior of the fitting model using above-
+    defined likelihood and prior.
+    :param: theta           Array of fitted parameters with
+                            theta[0] = F_sky (sky flux)
+                            theta[1] = A_bg (BG scaling)
+                            theta[2] = Gal. Lon. of source (deg)
+                            theta[3] = Gal. Lat. of source (deg)
+    :param: response_sky    Response grid with regular sky dimension
+    :param: xs              Array of pointing x-directions
+    :param: ys              Array of pointing y-direction
+    :param: zs              Array of pointing directions to calculate
+                            threshold for outside field of view
+    :param: response_bg     Background response, valid for all times
+    :param: dt              Exposure/observation time per pointing
+    :param: response_calc_type:   Default: 'look-up', i.e. uses values of response grid as their are to calculate
+                                       response (fastest, doesn't take neighbouring pixels in response into
+                                       account)
+                                       'and-dist': weighting with angular distance of 'four hit pixels'
+                                       'lin-dist': weighting with euclidean distance of 'four hit pixels'
+                                       'area: weighting with overlapping area of 'four hit pixels' (should be 
+                                              the most correct, however buggy because pixels are not assigned
+                                              correctly).
+    :param: n_hours         Number of hours in data set
+    :param: tracer          Background tracer with the same number of entries as n_hours    
+    """
+    # get prior
+    lp = lnprior_PSsearchFlux_hourly(theta,zs)
+    if not np.isfinite(lp):
+        return -np.inf
+    # add prior to likelihood and return posterior
+    return lp + lnlike_PSsearchFlux_hourly_bgtracer(theta, data, response_sky, xs, ys, zs, response_bg, dt,
+                                                    response_calc_type, n_hours, tracer)
+
+
